@@ -1,4 +1,6 @@
 version: 2
+orbs: 
+  - gcp-cli: circleci/gcp-cli@1.5.0
 jobs:
   build:
     docker:
@@ -6,15 +8,39 @@ jobs:
     steps:
       - checkout
       - run: sudo docker-php-ext-install pdo_mysql exif
-      # composer cache
+      # load composer cache
       - restore_cache:
           keys:
-          # "composer.lock" can be used if it is committed to the repo
-          - v1-dependencies-{{ checksum "composer.json" }}
+            - v1-dependencies-{{ checksum "composer.lock" }}
       - run: composer install -n --prefer-dist
+      # save composer cache
       - save_cache:
           key: composer-v1-{{ checksum "composer.lock" }}
           paths:
             - vendor
       # build static assets
       - run: php build.php
+      # save output
+      - save_cache:
+          key: build-v1-${CIRCLE_SHA1}
+          paths:
+            - vendor
+  deploy:
+    docker:
+      - image: circleci/php:7.3-stretch-node-browsers
+    steps:
+      - gcp-cli/install_and_initialize_cli
+      - restore_cache:
+          keys:
+            - build-v1-${CIRCLE_SHA1}
+      # ultimately master-only, but to test for now...
+      - run: gcloud app deploy app.yaml cron.yaml --no-promote --version "${CIRCLE_BRANCH}-${CIRCLE_BUILD_NUM}-${CIRCLE_SHA1}"
+workflows:
+   version: 2
+   build-and-deploy:
+     executor: default
+     jobs:
+      - build
+      - gcp-cli/install_and_initialize_cli:
+          context: org-production
+      - deploy
